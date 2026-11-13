@@ -5,7 +5,7 @@
 
 - 원칙: 기록에 없는 값은 만들어 넣지 않는다. 추정하는 값은 추정이라고 밝힌다.
 
-공개 배포를 준비 중이다(npm 패키지 `agent-watchtower` + Claude Code 플러그인). 화면은 영어 기본 + 한국어.
+공개 배포했다: npm 패키지 `agent-watchtower`(0.1.0, 계정 dev.june) + GitHub `01-june-0/agent-watchtower` + Claude Code 플러그인. 화면은 영어 기본 + 한국어.
 
 ## 실행
 
@@ -83,11 +83,10 @@ npm test                        # 계산 규칙 자동 테스트 (node --test, t
 - 자문 시점 분류의 정확도(조언 내용이 암호화되어 대조할 방법이 없음).
 - 윈도우·리눅스 실행(테스트는 맥 Node 22·23·24에서 통과).
 - 플러그인 설치(`/plugin marketplace add`)와 `/agent-watchtower:start` 실제 동작. 깃 저장소가 있어야 시험할 수 있다.
-- npm 공개(아직 올리지 않음). 이름 `agent-watchtower`는 2026-11-13 기준 비어 있었다.
 
 ## 다음 단계 후보
 
-- 깃 저장소 만들고 GitHub에 올리기 → README의 `<owner>/<repo>` 채우기 → 플러그인 설치 시험 → npm 공개.
+- 새 버전을 낼 때: `package.json` 과 `.claude-plugin/plugin.json` 의 version 을 같이 올리고, `npm publish`(2단계 인증 필요)와 `git push`.
 - GitHub Actions로 윈도우·리눅스·맥 × Node 22/24 테스트.
 - 안 쓰는 CSS 정리: `.tiles`, `.log-head`, `.timeline`, `.sig .pick`, `.sig-note`, `.sig-div`, `tile()` 함수.
 - 세션이 멈추거나 오류가 반복될 때 알림.
