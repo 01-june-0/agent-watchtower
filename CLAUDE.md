@@ -5,7 +5,7 @@
 
 - 원칙: 기록에 없는 값은 만들어 넣지 않는다. 추정하는 값은 추정이라고 밝힌다.
 
-공개 배포했다: npm 패키지 `agent-watchtower`(0.1.0, 계정 dev.june) + GitHub `01-june-0/agent-watchtower` + Claude Code 플러그인. 화면은 영어 기본 + 한국어.
+공개 배포했다: npm 패키지 `agent-watchtower`(0.1.1, 계정 dev.june) + GitHub `01-june-0/agent-watchtower` + Claude Code 플러그인. 화면은 영어 기본 + 한국어.
 
 ## 실행
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-watchtower",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local, read-only dashboard that shows what your Claude Code sessions, subagents and advisor are doing right now.",
   "license": "MIT",
   "keywords": ["monitor", "dashboard", "subagents", "sessions"]
