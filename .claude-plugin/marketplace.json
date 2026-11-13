@@ -1,0 +1,12 @@
+{
+  "name": "agent-watchtower",
+  "owner": { "name": "agent-watchtower contributors" },
+  "plugins": [
+    {
+      "name": "agent-watchtower",
+      "source": "./",
+      "description": "Local, read-only dashboard for Claude Code sessions, subagents and advisor calls. Reads transcripts on this machine only.",
+      "category": "monitoring"
+    }
+  ]
+}

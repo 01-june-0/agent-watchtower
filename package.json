@@ -1,0 +1,44 @@
+{
+  "name": "agent-watchtower",
+  "version": "0.1.0",
+  "description": "A local, read-only dashboard that shows what your Claude Code sessions, subagents and advisor are doing right now.",
+  "type": "module",
+  "bin": {
+    "agent-watchtower": "bin/agent-watchtower.mjs"
+  },
+  "files": [
+    "bin",
+    "server.mjs",
+    "setup.mjs",
+    "setup",
+    "index.html",
+    "README.md",
+    "README.ko.md",
+    "docs",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent",
+    "subagent",
+    "monitor",
+    "dashboard"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/01-june-0/agent-watchtower.git"
+  },
+  "homepage": "https://github.com/01-june-0/agent-watchtower#readme",
+  "bugs": {
+    "url": "https://github.com/01-june-0/agent-watchtower/issues"
+  },
+  "license": "MIT"
+}

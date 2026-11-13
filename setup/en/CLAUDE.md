@@ -1,0 +1,3 @@
+- Before reporting work with substantial code changes as done, have the `critic` subagent review the diff, then fix each issue it raises or rebut it with reasons before reporting.
+  - This rule applies only to the main session talking to the user. Subagents do not call critic on their own; they get reviewed only as many times as the lead tells them to (none if not told).
+  - Do not re-run critic on the same change. Once reviewed and addressed, report.

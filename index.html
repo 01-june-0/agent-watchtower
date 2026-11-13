@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Watchtower</title>
+<style>
+  /* 터미널 느낌: 어두운 배경, 고정폭 글꼴, 각진 테두리 상자, 테두리 위에 얹힌 제목 */
+  :root {
+    color-scheme: dark;
+    --page: #090b10; --bg: #11151d; --line: #2b3445; --track: #1b2230;
+    --text: #d8dee9; --dim: #9aa4b5; --faint: #7a859a; --deco: #4d576a; --sb: 60px;
+    --main: #f0946a; --sub: #6fb1f5; --adv: #b497f5; --ok: #6fdc8c; --warn: #f2c14e; --err: #f2707a;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, "D2Coding", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--page); color: var(--text); font: 13px/1.55 var(--mono); font-variant-numeric: tabular-nums; }
+  button { font: inherit; color: inherit; }
+  ::selection { background: #3a4a66; }
+  * { scrollbar-color: var(--line) transparent; scrollbar-width: thin; }
+
+  /* 화면 높이에 꼭 맞춘 틀: 위(제목줄·머리글·범례)와 아래(상태줄)는 고정, 가운데 두 칸만 스크롤 */
+  .term { max-width: 1480px; height: 100vh; height: 100dvh; overflow: hidden; margin: 0 auto; background: var(--bg); border-inline: 1px solid var(--line); display: flex; flex-direction: column; }
+  /* 창 제목줄: 신호등 단추 · 가운데 제목 · 오른쪽 연결 상태 */
+  .titlebar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+  .lights { display: flex; gap: 7px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; }
+  .lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+  .wtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: center; }
+  .tb-right { justify-self: end; display: flex; gap: 4px 16px; align-items: center; white-space: nowrap; min-width: 0; overflow: hidden; }
+  .conn { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+  .top-stats { display: flex; gap: 4px 14px; color: var(--dim); }
+  .top-stats b { color: var(--text); font-weight: 700; }
+
+  /* 머리글 한 줄: 제목 · 메인 모델 · 하위 모델, 아래 겹줄 */
+  header.top { display: flex; justify-content: center; align-items: baseline; flex-wrap: wrap; gap: 4px 0; padding: 14px 18px 12px; margin: 0 18px; border-bottom: 3px double var(--line); letter-spacing: .12em; text-transform: uppercase; }
+  header.top h1 { font-size: 13px; margin: 0; font-weight: 700; letter-spacing: inherit; }
+  header.top .roles { font-size: 13px; color: var(--text); }
+  header.top .sep { color: var(--deco); margin: 0 14px; }
+  header.top .r-main { color: var(--main); font-weight: 700; } header.top .r-sub { color: var(--sub); font-weight: 700; }
+
+  .legend { display: flex; justify-content: center; gap: 6px 44px; flex-wrap: wrap; padding: 10px 18px; color: var(--dim); }
+  .legend span::before { content: '■'; margin-right: 9px; }
+  .legend .l-main::before { color: var(--main); } .legend .l-sub::before { color: var(--sub); }
+  .legend .l-adv::before { color: var(--adv); } .legend .l-ok::before { color: var(--ok); }
+
+  /* 상태 표시: 작은 네모 */
+  .dot { width: 8px; height: 8px; background: var(--faint); flex: none; display: inline-block; }
+  .dot.working { background: var(--ok); animation: blink 1.2s steps(2, jump-none) infinite; }
+  .dot.running { background: var(--sub); animation: blink 1.2s steps(2, jump-none) infinite; }
+  .dot.waiting { background: var(--warn); }
+  .dot.idle, .dot.done { background: var(--faint); }
+  .dot.stalled, .dot.off { background: var(--err); }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); flex: 1; min-height: 0; }
+  aside { border-right: 1px solid var(--line); padding: 14px 10px; overflow-y: auto; min-height: 0; }
+  aside h2, main > h2, .log-head h2 { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 400; color: var(--dim); letter-spacing: .04em; margin: 0 0 10px; }
+  main > h2::before, .log-head h2::before { content: '──'; color: var(--deco); }
+  main > h2::after, .log-head h2::after, aside h2::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+  main > h2 { margin-top: 4px; }
+
+  .sess { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-left: 2px solid transparent; padding: 6px 8px; margin-bottom: 2px; cursor: pointer; }
+  .sess:hover { background: var(--track); }
+  .sess[aria-current="true"] { background: var(--track); border-left-color: var(--main); }
+  .sess:focus-visible, .chip:focus-visible, .log:focus-visible { outline: 1px solid var(--sub); outline-offset: 1px; }
+  .sess .t { display: flex; align-items: center; gap: 8px; }
+  .sess .t span.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess[aria-current="true"] .name { color: var(--main); font-weight: 700; }
+  .sess .m { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 16px; }
+  .sess .m2 { color: var(--faint); font-size: 12px; display: flex; gap: 10px; padding-left: 16px; white-space: nowrap; overflow: hidden; }
+
+  main { padding: 18px 20px 28px; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  .titlebar, header.top, .legend, .statusbar { flex: none; }
+  .empty { color: var(--dim); padding: 60px 20px; text-align: center; }
+  .empty::after { content: ' ▮'; animation: blink 1s steps(2, jump-none) infinite; }
+  .head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .head h2 { all: unset; font-size: 16px; font-weight: 700; }
+  .head h2::before { content: '$ '; color: var(--ok); }
+  .pill { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; color: var(--dim); white-space: nowrap; }
+  .pill::before { content: '['; color: var(--deco); } .pill::after { content: ']'; color: var(--deco); }
+  .sub-head { color: var(--dim); font-size: 12px; margin: 2px 0 12px; word-break: break-all; }
+
+  .statline { display: flex; flex-wrap: wrap; gap: 4px 30px; margin: 0 0 26px; color: var(--dim); }
+  .statline b { color: var(--text); font-weight: 700; }
+  .statline .err b { color: var(--err); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 0; margin-bottom: 26px; border: 1px solid var(--line); }
+  .tile { padding: 9px 12px; border-right: 1px dashed var(--line); margin-right: -1px; }
+  .tile .k { color: var(--dim); font-size: 12px; }
+  .tile .v { font-size: 20px; font-weight: 700; }
+  .tile .v.err { color: var(--err); }
+  .tile .s { color: var(--faint); font-size: 11px; }
+
+  /* 상자: 제목이 테두리 위에 얹힘 */
+  .box { position: relative; border: 1px solid var(--line); padding: 14px 14px 12px; min-width: 0; }
+  .box .role { position: absolute; top: -10px; left: 10px; background: var(--bg); padding: 0 7px; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+  .box.main { border-color: var(--main); } .box.adv { border-color: var(--adv); } .box.sub { border-color: var(--sub); }
+  .box.main .role { color: var(--main); } .box.adv .role { color: var(--adv); }
+  .box .model { font-size: 15px; font-weight: 700; margin: 0 0 6px; }
+  .box.main .model { color: var(--main); } .box.adv .model { color: var(--adv); }
+  /* 메인 세션 상자: 가운데 정렬 네 줄 + 점선 아래 세부 */
+  .box.mb { padding-top: 12px; }
+  .mb-title { text-align: center; color: var(--main); font-weight: 700; font-size: 14px; }
+  .mb-doing { text-align: center; color: var(--text); }
+  .mb-effort { display: flex; justify-content: center; align-items: center; gap: 8px; color: var(--dim); }
+  .mb-effort .ebars { display: inline-flex; gap: 2px; }
+  .mb-effort .ebars i { width: 5px; height: 11px; background: var(--deco); }
+  .mb-effort .ebars i.f { background: var(--main); }
+  .mb-effort b { color: var(--main); font-weight: 400; }
+  .mb-flag { text-align: center; color: var(--faint); }
+  .mb-more { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+  .mb-more .pending { border-top: 0; padding-top: 0; }
+  .mb-more .last { border-top: 0; padding-top: 0; margin-top: 6px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 14px; font-size: 12px; margin: 0; }
+  .kv dt { color: var(--dim); } .kv dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note { color: var(--faint); font-size: 11px; margin-top: 8px; }
+  .pending { margin-top: 8px; font-size: 12px; color: var(--dim); border-top: 1px dashed var(--line); padding-top: 6px; }
+  .pending div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 흐름도: 왼쪽 조언자 ··▶ 가운데 세로 흐름 */
+  .flowchart { display: grid; grid-template-columns: 270px minmax(0, 780px); gap: 0 48px; margin-bottom: 26px; }
+  .flowchart.no-adv { grid-template-columns: minmax(0, 780px); }   /* 조언자를 쓰지 않는 세션: 패널 없이 가운데 흐름만 */
+  .chip.lang { flex: none; padding: 0 8px; font-size: 11px; }
+  /* 조언자 패널: 가운데 정렬 제목, 세 시점 표시줄(◆/◇)과 그 사이를 잇는 점선 등줄기 */
+  .fc-adv { display: flex; flex-direction: column; padding-top: 12px; }
+  .adv-title { text-align: center; color: var(--adv); font-weight: 700; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
+  .adv-sub { text-align: center; color: var(--adv); font-size: 12px; margin-bottom: 10px; }
+  .mk { position: relative; display: flex; gap: 8px; align-items: center; margin: 0 -14px; padding: 3px 14px; color: var(--dim); }
+  .mk .g { color: var(--adv); } .mk .n { margin-left: auto; color: var(--faint); font-weight: 400; }
+  .mk.cur { background: color-mix(in srgb, var(--adv) 16%, transparent); color: var(--text); font-weight: 700; }
+  /* 표시줄에서 오른쪽 흐름으로 뻗는 점선 화살표 */
+  .mk::after { content: '▶'; position: absolute; left: calc(100% + 1px); top: 50%; width: 47px; margin-top: -6px; line-height: 1; font-size: 11px; text-align: right; color: var(--deco);
+    background: linear-gradient(90deg, var(--deco) 50%, transparent 0) 0 50% / 6px 1px repeat-x; }
+  .mk.cur::after { color: var(--adv); background-image: linear-gradient(90deg, var(--adv) 50%, transparent 0); }
+  .mk.on::before { content: ''; position: absolute; left: calc(100% + 1px); top: 50%; margin-top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--adv);
+    animation: flowright 1s linear infinite; animation-delay: var(--t, 0ms); }
+  .spine { flex: 1 0 auto; min-height: 64px; margin-left: 4px; padding: 10px 0 10px 15px; border-left: 1px dashed var(--line); font-size: 12px; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+  .spine .dimtxt { color: var(--dim); } .spine .small { font-size: 11px; color: var(--faint); }
+  .spine > * { flex: none; }   /* 안쪽 줄은 눌리지 않게 */
+  .spine .gap { height: 8px; }
+  .adv-line { color: var(--adv); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adv-line.none { color: var(--faint); font-weight: 400; }
+  .fc-center { display: flex; flex-direction: column; min-width: 0; container-type: inline-size; }
+  @container (max-width: 600px) {
+    .branch { grid-template-columns: 1fr; gap: 14px; padding: 0; }
+    .branch::before, .branch::after, .branch > .box::before, .branch > .box::after { display: none; }
+    .wire + .branch, .branch + .wire { margin-top: 0; }
+  }
+  .timeline { list-style: none; margin: 12px 0 4px 4px; padding: 0 0 0 14px; border-left: 1px dashed var(--adv); font-size: 12px; color: var(--dim); }
+  .timeline li { position: relative; padding: 2px 0; }
+  .timeline li::before { content: ''; position: absolute; left: -18px; top: 8px; width: 7px; height: 7px; background: var(--adv); transform: rotate(45deg); }
+  .timeline .t { color: var(--text); }
+  .box.tools { border-color: var(--ok); } .box.tools .role { color: var(--ok); }
+  /* 확신도형 막대: 채워진 부분은 진하게, 나머지는 같은 색을 옅게 */
+  .box.tools { padding-top: 11px; }
+  .jl-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .jl-title { color: var(--ok); font-weight: 700; }
+  .jl-count { color: var(--dim); white-space: nowrap; } .jl-count b { color: var(--ok); margin-left: 6px; }
+  .jl-foot { display: flex; flex-wrap: wrap; gap: 2px 30px; margin-top: 6px; }
+  .jl-foot span { color: var(--faint); }
+  .jl-foot .k-sharp.cur { color: var(--ok); } .jl-foot .k-split.cur { color: var(--main); }
+  .jl-note { margin-top: 6px; }
+  .sig { display: grid; grid-template-columns: 118px minmax(60px, 1fr) 104px; gap: 12px; align-items: center; font-size: 12px; padding: 2px 0; }
+  .sig.sharp { --c: var(--ok); } .sig.split { --c: var(--main); } .sig.na { --c: var(--deco); }
+  .sig .meter { display: block; height: 14px; background: color-mix(in srgb, var(--c) 30%, transparent); }
+  .sig .meter i { display: block; height: 100%; background: var(--c); transition: width .4s ease; }
+  .sig .val { color: var(--c); font-weight: 700; white-space: nowrap; }
+  .sig.na .val { color: var(--faint); }
+  .sig .pick { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sig-note .k-sharp { color: var(--ok); } .sig-note .k-split { color: var(--main); }
+  .sig-div { border-top: 1px dashed var(--line); margin: 10px 0 8px; }
+  .fc-return .last { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* 세로 연결선과 그 위를 흐르는 점 */
+  .wire { position: relative; min-height: 38px; padding: 9px 0; display: flex; align-items: center; justify-content: center; }
+  .wire::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+  .wire span { position: relative; z-index: 1; background: var(--bg); padding: 0 10px; color: var(--dim); font-size: 12px; text-align: center; }
+  .wire.on::after { content: ''; position: absolute; left: 50%; top: 0; width: 7px; height: 7px; margin-left: -3px; border-radius: 50%; background: var(--sub); animation: flowdown 1s linear infinite; animation-delay: var(--t, 0ms); }
+  @keyframes flowdown { from { transform: translateY(-3px); } to { transform: translateY(34px); } }
+
+  /* 갈라졌다 다시 모이는 가지: 위아래 가로선 + 카드마다 세로 연결 */
+  .branch { --g: 14px; --half: calc((100% - (var(--n) - 1) * var(--g)) / (2 * var(--n)));
+    position: relative; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 0 var(--g); padding: 18px 0; }
+  /* 가로선: 7px 높이 띠 안에 1px 선을 그리고, 실행 중이면 그 위로 점 두 개가 움직임 */
+  .branch::before, .branch::after { content: ''; position: absolute; left: calc(var(--half) - 3px); right: calc(var(--half) - 3px); height: 7px;
+    background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; }
+  .branch::before { top: -3px; } .branch::after { bottom: -3px; }
+  .branch.on:not(.single)::before, .branch.on:not(.single)::after {
+    background: radial-gradient(circle, var(--sub) 3px, transparent 3.5px) 50% 50% / 7px 7px no-repeat,
+                radial-gradient(circle, var(--sub) 3px, transparent 3.5px) 50% 50% / 7px 7px no-repeat,
+                linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat;
+    animation: railout 2s linear infinite; animation-delay: var(--t, 0ms); }
+  .branch.on:not(.single)::after { animation-name: railin; }
+  @keyframes railout { from { background-position: 50% 50%, 50% 50%, center; } to { background-position: 0% 50%, 100% 50%, center; } }  /* 가운데 → 양 끝 */
+  @keyframes railin { from { background-position: 0% 50%, 100% 50%, center; } to { background-position: 50% 50%, 50% 50%, center; } }   /* 양 끝 → 가운데 */
+
+  /* 카드 위아래 세로 연결: 실행 중인 카드는 점이 아래로 흐름 */
+  .branch > .box::before, .branch > .box::after { content: ''; position: absolute; left: 50%; margin-left: -4px; width: 7px; height: 18px;
+    background: linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat; }
+  .branch > .box::before { bottom: 100%; } .branch > .box::after { top: 100%; }
+  .branch > .box.running::before, .branch > .box.running::after {
+    background: radial-gradient(circle, var(--sub) 3px, transparent 3.5px) 50% -7px / 7px 7px no-repeat,
+                linear-gradient(var(--sub), var(--sub)) center / 1px 100% no-repeat;
+    animation: stubdown 1s linear infinite; animation-delay: var(--t, 0ms); }
+  @keyframes stubdown { to { background-position: 50% 18px, center; } }
+
+  @keyframes flowright { from { transform: translateX(0); } to { transform: translateX(36px); } }
+
+  .subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 14px; margin-bottom: 26px; }
+  .box.sub { padding-top: 10px; }
+  .box.sub .ttl { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--sub); }
+  .box.sub .desc { color: var(--text); font-size: 12px; margin: 2px 0 8px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 37px; }
+  .box.sub.done { border-color: var(--line); } .box.sub.done .ttl { color: var(--dim); }
+  .box.sub.stalled { border-color: var(--err); }
+  .sc-name { text-align: center; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sc-model { text-align: center; color: var(--sub); margin-bottom: 6px; }
+  .box.sub.done .sc-model { color: var(--dim); }
+  /* 진행률 막대: 추정값이면 ≈ 표시, 추정할 수 없으면 좌우로 오가는 띠 */
+  .prog { display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px; align-items: center; margin: 2px 0 6px; }
+  .ptrack { display: block; height: 12px; background: var(--track); overflow: hidden; }
+  .ptrack i { display: block; height: 100%; background: var(--sub); }
+  .box.sub.done .ptrack i { background: color-mix(in srgb, var(--sub) 50%, var(--bg)); }
+  .box.sub.stalled .ptrack i { background: var(--err); }
+  .prog .pct { text-align: right; color: var(--dim); white-space: nowrap; }
+  .box.sub.running .prog.unknown .ptrack i { opacity: .75; animation: indet 2s linear infinite; animation-delay: var(--t, 0ms); }
+  @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(334%); } }
+  .box.sub .desc { text-align: center; }
+  .sc-status { text-align: center; color: var(--sub); font-size: 12px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed var(--line); }
+  .box.sub.done .sc-status { color: var(--ok); } .box.sub.stalled .sc-status { color: var(--err); }
+
+  /* 막대: 칸칸이 끊어진 블록 */
+  .bars { border: 1px solid var(--line); padding: 10px 14px; margin-bottom: 26px; }
+  .bar { display: grid; grid-template-columns: minmax(90px, 240px) 1fr 44px; gap: 12px; align-items: center; font-size: 12px; padding: 1px 0; }
+  .bar .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { height: 10px; background: repeating-linear-gradient(90deg, var(--track) 0 5px, transparent 5px 7px); overflow: hidden; }
+  .bar .fill { height: 100%; background: repeating-linear-gradient(90deg, var(--sub) 0 5px, transparent 5px 7px); }
+  .bar .c { text-align: right; color: var(--dim); }
+
+  .log-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .log-head h2 { flex: 1; min-width: 180px; margin: 0; }
+  .chip { background: transparent; border: 0; padding: 0 2px; font-size: 12px; color: var(--dim); cursor: pointer; }
+  .chip::before { content: '[ '; color: var(--deco); } .chip::after { content: ' ]'; color: var(--deco); }
+  .chip:hover { color: var(--text); }
+  .chip[aria-pressed="true"] { color: var(--ok); }
+  .chip[aria-pressed="true"]::before { content: '[*'; color: var(--ok); }
+  .logbox { position: relative; border: 1px solid var(--line); margin-top: 22px; padding-top: 8px; }
+  .logbox-title, .logbox-chips { position: absolute; top: -10px; background: var(--bg); color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .logbox-title { left: 22px; padding: 0 2px; }
+  .logbox-title::before { content: '┤ '; color: var(--line); } .logbox-title::after { content: ' ├'; color: var(--line); }
+  .logbox-chips { right: 14px; padding: 0 6px; display: flex; gap: 8px; }
+  .log { border: 0; margin-top: 0; max-height: 440px; overflow: auto; overscroll-behavior: contain; font-size: 12px; line-height: 1.65; padding: 6px 0; }
+  .row { display: grid; grid-template-columns: 104px 92px 132px minmax(0, 1fr) 100px; gap: 12px; padding: 0 14px; white-space: nowrap; }
+  .row:hover { background: var(--track); }
+  .row > * { overflow: hidden; text-overflow: ellipsis; }
+  .row .ts { color: var(--faint); }
+  .row .who { font-weight: 700; }
+  .row .who.main { color: var(--main); } .row .who.sub { color: var(--sub); } .row .who.adv { color: var(--adv); }
+  .row .what { color: var(--faint); }
+  .note .k-sharp { color: var(--ok); } .note .k-split { color: var(--main); }
+  .row .txt { color: var(--dim); }
+  .row.tool .txt::before { content: '→ '; color: var(--faint); }
+  .row.tool .txt:empty::before { content: none; }
+  .row.tool .what, .row.error .what { color: var(--text); }
+  .row .p { color: var(--dim); } .row .p b { font-weight: 400; }
+  .row .p.sharp b { color: var(--ok); } .row .p.split b { color: var(--main); } .row .p.few b { color: var(--faint); }
+  /* 맨 마지막(가장 최근) 줄은 또렷하게 */
+  .row:last-child .txt, .row:last-child .ts, .row:last-child .p { color: var(--text); }
+  .row.error .what, .row.error .txt { color: var(--err); }
+  .row.prompt .txt { color: var(--text); font-weight: 700; }
+  .row.prompt .txt::before { content: '❯ '; color: var(--ok); }
+  .row.advisor .txt { color: var(--adv); }
+  .log .none { padding: 12px 14px; color: var(--dim); }
+
+  /* 맨 아래 두 줄 상태 표시: 명령 줄 + 상태 줄 */
+  .statusbar { background: var(--bg); border-top: 1px solid var(--line); padding: 8px 18px 9px; min-height: var(--sb); font-size: 13px; }
+  .statusbar .line1 { color: var(--text); display: flex; gap: 14px; overflow: hidden; white-space: nowrap; }
+  .statusbar .cmd { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .statusbar .path { color: var(--ok); }
+  .statusbar .flag { color: var(--warn); }
+  .statusbar .recon { color: var(--faint); flex: none; }
+  .statusbar .cursor { display: inline-block; width: 8px; height: 15px; background: var(--ok); vertical-align: -3px; animation: blink 1s steps(2, jump-none) infinite; }
+  .statusbar .line2 { display: flex; gap: 2px 28px; justify-content: space-between; color: var(--dim); white-space: nowrap; overflow: hidden; margin-top: 2px; }
+  .statusbar .seg b { font-weight: 400; color: var(--text); }
+  .statusbar .s-sub b { color: var(--sub); } .statusbar .s-adv b { color: var(--adv); }
+  .statusbar .s-tools b { color: var(--ok); } .statusbar .s-err b { color: var(--err); }
+
+  @media (prefers-reduced-motion: reduce) { .dot, .cursor, .empty::after { animation: none !important; } .wire.on::after { display: none; } .wire.on::before { border-left-color: var(--sub); }
+    .branch::before, .branch::after, .branch > .box::before, .branch > .box::after { animation: none !important; }
+    .branch.on:not(.single)::before, .branch.on:not(.single)::after { background: linear-gradient(var(--sub), var(--sub)) center / 100% 1px no-repeat; }
+    .mk.on::before { display: none; }
+    .prog.unknown .ptrack i { animation: none !important; width: 0 !important; } .sig .meter i { transition: none; } }
+  /* 중간 폭: 조언자를 위로 올려 가운데 흐름에 자리를 내줌 */
+  @media (max-width: 1200px) {
+    .flowchart { grid-template-columns: minmax(0, 780px); gap: 22px; }
+    .mk::after, .mk.on::before { display: none; }
+  }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .term { height: auto; min-height: 100vh; overflow: visible; }
+    main { overflow: visible; }
+    aside { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--line); }
+    .flowchart { grid-template-columns: 1fr; gap: 22px; }
+    .mk::after, .mk.on::before { display: none; }
+    .branch { grid-template-columns: 1fr; gap: 14px; padding: 0; }
+    .branch::before, .branch::after, .branch > .box::before, .branch > .box::after { display: none; }
+    .row { grid-template-columns: 72px 92px minmax(0, 1fr); gap: 8px; }
+    .row .ts, .row .p { display: none; }
+    .logbox { padding-top: 0; margin-top: 16px; }
+    .logbox-title, .logbox-chips { position: static; padding: 6px 12px 0; }
+    .logbox-chips { flex-wrap: wrap; padding-bottom: 4px; }
+    main { padding: 16px 14px 24px; }
+    .titlebar { grid-template-columns: auto 1fr; }
+    .wtitle { display: none; }
+    .top-stats { display: none; }
+    header.top { margin: 0; letter-spacing: .06em; flex-direction: column; align-items: center; }
+    header.top .roles .sep:first-child { display: none; }
+    .legend { justify-content: flex-start; gap: 4px 20px; }
+    .sig { grid-template-columns: 96px minmax(40px, 1fr) 92px; }
+    .bar { grid-template-columns: minmax(0, 44%) minmax(0, 1fr) 34px; gap: 10px; }
+    .statusbar .line1 { flex-wrap: wrap; gap: 0 14px; white-space: normal; }
+    .statusbar .cmd { word-break: break-all; }
+    .statusbar .line2 { flex-wrap: wrap; justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="term">
+<div class="titlebar">
+  <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+  <span class="wtitle" id="wtitle">~ — claude</span>
+  <span class="tb-right">
+    <span class="conn"><span class="dot" id="connDot"></span><span id="connText"></span></span>
+    <button class="chip lang" id="langBtn" type="button"></button>
+    <span class="top-stats" id="topStats"></span>
+  </span>
+</div>
+<header class="top"><h1>AGENT WATCHTOWER</h1><span class="roles" id="headRoles"></span></header>
+<div class="legend" id="legend"></div>
+<div class="layout">
+  <aside>
+    <h2 id="listHead"></h2>
+    <div id="list"></div>
+  </aside>
+  <main id="main"><div class="empty" id="bootMsg"></div></main>
+</div>
+<footer class="statusbar" id="statusbar"></footer>
+</div>
+
+<script>
+'use strict';
+// 모든 글자는 textContent 로만 넣는다 (기록 속 문자열이 HTML 로 해석되지 않도록).
+const h = (tag, props, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'style') el.style.cssText = v;
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid);
+  return el;
+};
+const $ = (id) => document.getElementById(id);
+
+
+const fmtNum = (n) => {
+  n = Number(n) || 0;
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k';
+  return String(n);
+};
+const p2 = (n) => String(n).padStart(2, '0');
+// 오늘 것은 시:분:초, 다른 날 것은 앞에 월/일을 붙인다
+const fmtTime = (ts) => {
+  if (!ts) return '—';
+  const d = new Date(ts), t = p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  return d.toDateString() === new Date().toDateString() ? t : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + t;
+};
+const fmtAgo = (ts, now) => {
+  if (!ts) return '—';
+  const s = Math.max(0, Math.round((now - ts) / 1000));
+  if (s < 5) return T.justNow;
+  if (s < 60) return T.ago(s + T.u.s);
+  if (s < 3600) return T.ago(Math.floor(s / 60) + T.u.m);
+  if (s < 86400) return T.ago(Math.floor(s / 3600) + T.u.h);
+  return T.ago(Math.floor(s / 86400) + T.u.d);
+};
+const fmtDur = (ms) => {
+  if (!ms || ms < 0) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + T.u.s;
+  if (s < 3600) return Math.floor(s / 60) + T.u.m + ' ' + (s % 60) + T.u.s;
+  return Math.floor(s / 3600) + T.u.h + ' ' + Math.floor((s % 3600) / 60) + T.u.m;
+};
+const shortModel = (m) => m ? String(m).replace(/^claude-/, '') : '—';
+
+const state = { snap: null, selected: null, pinned: false, detail: null, filter: 'all', req: 0,
+  listKey: '', detailKey: '', resetScroll: false };
+
+// ───────────── 화면 문구 (영어 기본 + 한국어) ─────────────
+// 고르는 순서: 주소의 ?lang= → 지난번에 고른 값 → 브라우저 언어가 한국어면 한국어 → 영어
+const I18N = {
+  en: {
+    title: 'Agent Watchtower',
+    status: { working: 'working', waiting: 'awaiting input', idle: 'idle', running: 'running', done: 'done', stalled: 'stalled?' },
+    kind: { tool: 'tool call', error: 'error', prompt: 'user prompt', text: 'reply', advisor: 'advisor', info: 'info' },
+    ev: { compact: 'conversation compacted (context trimmed)', advice: 'consulted the advisor' },
+    conn: { connecting: 'connecting…', live: 'live', lost: 'disconnected — retrying' },
+    langBtn: '한국어', langTip: '한국어로 보기',
+    legendAria: 'Color legend',
+    sessionsHead: (h) => 'Sessions (last ' + h + 'h)',
+    readingLogs: 'Reading session transcripts…',
+    u: { s: 's', m: 'm', h: 'h', d: 'd' }, justNow: 'just now', ago: (x) => x + ' ago',
+    topSessions: 'sessions', topWorking: 'working', topSubs: 'subagents running',
+    follow: '↻ Follow the active session',
+    nTools: (n) => 'tools ' + n, nSubs: (n) => 'sub ' + n, nErrs: (n) => 'errors ' + n,
+    reading: 'Reading…', noSessions: (h) => 'No sessions were active in the last ' + h + ' hours.',
+    untitled: '(untitled)', nothingToShow: 'No session to show.', loadingSession: 'Loading session…',
+    lastActivityPill: (ago) => 'last activity ' + ago, branch: (b) => '  ·  branch ' + b,
+    stReq: 'prompts', stReqTip: 'User prompts', started: (t) => ' · started ' + t,
+    stTools: 'tools', stToolsTip: (n) => 'All tool calls including subagents · main session only: ' + n,
+    stErr: 'errors', stErrTip: 'Failed tool results',
+    stCtx: 'context', stCtxTip: 'Input size of the latest request', compactions: (n) => ' · compacted ' + n + '×',
+    stOut: 'output', stOutTip: (i, c) => 'Output tokens · input ' + i + ' · cache reads ' + c,
+    stCost: 'cost', stCostTip: 'Last value found in the transcript',
+    why: { plan: 'before the plan is set', error: 'after repeated errors', done: 'before calling it done' },
+    nTimes: (n) => n + '×',
+    advisor: 'advisor', advRecent: 'consulted recently', advStandby: 'standby', advNoneLegend: 'advisor · none',
+    advRecentHead: 'Recent consults:', advNoneYet: '» none yet',
+    advCount: 'Consults', advToRead: 'To read', advCtxNote: '(current session context size)',
+    advOver: (n) => 'over ' + n + ' user prompt' + (n === 1 ? '' : 's'), advN: (n) => n + ' consult' + (n === 1 ? '' : 's'),
+    advLast: 'last consult', none: 'none',
+    advNote: 'The three moments are a guess based on the tool calls just before each consult. The advice itself is encrypted in the transcript, so it is not shown.',
+    kinds: { edit: 'editing', bash: 'running commands', read: 'reading code', delegate: 'delegating', web: 'web research', browser: 'browser checks', other: 'other tools' },
+    noToolUse: 'no tool use', unknownModel: 'unknown model',
+    mainSession: 'main session', mainSessionCap: 'Main session',
+    doingTip: 'The main session\'s last 20 tool calls, grouped by kind',
+    effort: 'effort ', effortAria: (n) => 'level ' + n + ' of 5', notRecorded: 'not recorded',
+    kvStatus: 'Status', kvTokens: 'Total tokens', tokensNote: ' (incl. subagents, excl. cache reads)',
+    pendingTools: 'Tools awaiting results:',
+    jlTitle: 'Decision layer · main session', jlCount: 'main tool calls ', jlCountTip: 'Tool calls by the main session only (subagents excluded)',
+    sig: { file: 'which file', tool: 'which tool', ok: 'error-free' },
+    few: 'too few', sharp: 'sharp', split: 'split',
+    sigTip: (label, g, has) => label + ': based on the last ' + g.n + ' call' + (g.n === 1 ? '' : 's')
+      + (g.key === 'ok' ? (typeof g.errs === 'number' ? ' · ' + (g.errs ? g.errs + ' error' + (g.errs === 1 ? '' : 's') : 'no errors') : '') : g.pick ? ' · most picked: ' + g.pick : '')
+      + (has ? '' : ' · fewer than 5 samples, so not rated'),
+    footSharp: 'sharp → heading one way', footSplit: 'split → moving between several',
+    noToolsYet: 'No tools used yet.',
+    jlNote: (n, sharp) => 'Estimates from the last ' + n + ' tool calls ("which file" counts file operations only; "which tool" leaves out bookkeeping calls such as task-list updates) · threshold ' + sharp + ' · not the model\'s internal confidence',
+    agent: 'agent', finished: 'Finished',
+    progTip: (name, n, med) => 'Estimate: compared with the median of ' + med + ' tool calls across ' + n + ' finished "' + name + '" agents',
+    progNone: 'Not enough finished runs to compare with, so progress is not estimated',
+    progAria: (name, est) => name + ' progress' + (est ? ' (estimated)' : ''),
+    noDesc: '(no description)',
+    kvCalls: 'Tool calls', errParen: (n) => ' (' + n + ' error' + (n === 1 ? '' : 's') + ')', kvTok: 'Tokens', kvElapsed: 'Elapsed', kvLastAction: 'Last action',
+    backToMain: 'back to main', latestReply: 'latest reply',
+    waitingSubs: 'waiting on subagents', noToolsAfter: 'no tool calls since returning',
+    afterTip: 'Tools the main session used after the most recently finished subagent, grouped by kind',
+    kvLastActivity: 'Last activity', kvPrompts: 'User prompts', nItems: (n) => String(n),
+    noReply: '(no reply yet)',
+    delegWire: (total, running) => 'delegated to subagents · ' + running + ' of ' + total + ' running',
+    otherSubs: (n) => n + ' more subagent' + (n === 1 ? '' : 's'), topTools: 'Most used tools · including subagents',
+    logAria: 'Session log', main: 'main', tool: 'tool', consult: 'consult',
+    pTip: (file, n, few) => 'Share of the last ' + n + (file ? ' file operations' : ' tool calls') + ' up to this one that picked the same ' + (file ? 'file' : 'tool') + (few ? ' — fewer than 5 samples, so not rated' : ''),
+    noRows: 'No matching entries.', logTitle: (n) => 'Session log · last ' + n,
+    chipAll: 'all', chipMain: 'main only', chipTool: 'tools only', chipErr: 'errors only',
+    pNote1: 'p = share of recent tool calls up to that one (at most 20; file operations are compared with file operations; bookkeeping calls are left out) that picked the same file or the same tool. With fewer than 5 samples, n is shown instead of a rating, and bookkeeping rows get no p. ',
+    pNote2: (sharp) => ' at ' + sharp + ' or above · ', pNote3: ' below that. This is not the model\'s internal confidence.',
+    loadingLegend: 'Loading session', roleMain: ' main', mixed: 'mixed models', roleSub: (n) => ' sub ×' + n,
+    lgMain: ' · main', lgSub: ' · sub', lgNoSubs: 'subagents · none', lgTools: (n) => 'tools · ' + n, lgAdv: ' · advisor', lgAdvCalls: (n) => 'advisor · ' + n + '×',
+    sbSession: 'session ', sbWaiting: '[waiting]', sbSubs: 'sub model',
+    reconTip: ' — reconstructed from the models named in the transcript (not the command that was actually typed)',
+    recon: '# reconstructed from the transcript', callsVal: (n) => n,
+  },
+  ko: {
+    title: '에이전트 워치타워',
+    status: { working: '작업 중', waiting: '입력 대기', idle: '휴면', running: '실행 중', done: '완료', stalled: '멈춘 듯' },
+    kind: { tool: '도구 호출', error: '오류', prompt: '사용자 요청', text: '응답', advisor: '조언자', info: '알림' },
+    ev: { compact: '대화 압축(컨텍스트 정리)', advice: '조언자에게 자문' },
+    conn: { connecting: '연결 중…', live: '실시간 연결됨', lost: '연결 끊김 — 다시 시도 중' },
+    langBtn: 'EN', langTip: 'Switch to English',
+    legendAria: '색 범례',
+    sessionsHead: (h) => '세션 (최근 ' + h + '시간)',
+    readingLogs: '세션 기록을 읽는 중입니다…',
+    u: { s: '초', m: '분', h: '시간', d: '일' }, justNow: '방금', ago: (x) => x + ' 전',
+    topSessions: '세션', topWorking: '작업 중', topSubs: '실행 중인 하위 에이전트',
+    follow: '↻ 최근 활동 세션 따라가기',
+    nTools: (n) => '도구 ' + n, nSubs: (n) => '하위 ' + n, nErrs: (n) => '오류 ' + n,
+    reading: '읽는 중…', noSessions: (h) => '최근 ' + h + '시간 안에 활동한 세션이 없습니다.',
+    untitled: '(제목 없음)', nothingToShow: '표시할 세션이 없습니다.', loadingSession: '세션을 불러오는 중…',
+    lastActivityPill: (ago) => '마지막 활동 ' + ago, branch: (b) => '  ·  브랜치 ' + b,
+    stReq: '요청', stReqTip: '사용자 요청 수', started: (t) => ' · 시작 ' + t,
+    stTools: '도구', stToolsTip: (n) => '하위 에이전트 포함 전체 도구 호출 수 · 메인 세션만 ' + n,
+    stErr: '오류', stErrTip: '실패한 도구 결과 수',
+    stCtx: '컨텍스트', stCtxTip: '최근 요청의 입력 크기', compactions: (n) => ' · 압축 ' + n + '회',
+    stOut: '출력', stOutTip: (i, c) => '출력 토큰 · 입력 ' + i + ' · 캐시 읽기 ' + c,
+    stCost: '비용', stCostTip: '기록에 마지막으로 남은 값',
+    why: { plan: '계획 확정 전', error: '같은 오류 반복 뒤', done: '완료 선언 전' },
+    nTimes: (n) => n + '회',
+    advisor: '조언자', advRecent: '최근 자문', advStandby: '대기', advNoneLegend: '조언자 · 없음',
+    advRecentHead: '최근 자문:', advNoneYet: '» 아직 없음',
+    advCount: '자문 횟수', advToRead: '읽을 분량', advCtxNote: '(현재 세션 컨텍스트 크기)',
+    advOver: (n) => '사용자 요청 ' + n + '건 동안', advN: (n) => '자문 ' + n + '회',
+    advLast: '마지막 자문', none: '없음',
+    advNote: '세 시점은 자문 직전의 도구 호출로 추정한 분류입니다. 조언 내용은 기록에 암호화되어 있어 표시하지 않습니다.',
+    kinds: { edit: '편집', bash: '명령 실행', read: '코드 읽기', delegate: '위임', web: '웹 조사', browser: '브라우저 확인', other: '기타 도구' },
+    noToolUse: '도구 사용 없음', unknownModel: '모델 미상',
+    mainSession: '메인 세션', mainSessionCap: '메인 세션',
+    doingTip: '메인 세션의 최근 도구 호출 20건을 종류별로 묶은 것',
+    effort: '추론 강도 ', effortAria: (n) => '5단계 중 ' + n + '단계', notRecorded: '기록 없음',
+    kvStatus: '상태', kvTokens: '전체 토큰', tokensNote: ' (하위 포함, 캐시 읽기 제외)',
+    pendingTools: '결과를 기다리는 도구:',
+    jlTitle: '판단 층 · 메인 세션', jlCount: '메인 도구 호출 ', jlCountTip: '메인 세션만 센 도구 호출 수 (하위 에이전트 제외)',
+    sig: { file: '어느 파일', tool: '어느 도구', ok: '오류 없이 진행' },
+    few: '표본 부족', sharp: '또렷', split: '갈림',
+    sigTip: (label, g, has) => label + ': 최근 ' + g.n + '건 기준'
+      + (g.key === 'ok' ? (typeof g.errs === 'number' ? ' · ' + (g.errs ? '오류 ' + g.errs + '건' : '오류 없음') : '') : g.pick ? ' · 가장 많이 고른 것: ' + g.pick : '')
+      + (has ? '' : ' · 표본 5건 미만이라 판정하지 않음'),
+    footSharp: '또렷 → 한 방향으로 진행', footSplit: '갈림 → 여러 갈래를 오감',
+    noToolsYet: '아직 도구를 쓰지 않았습니다.',
+    jlNote: (n, sharp) => '최근 도구 호출 ' + n + '건으로 계산한 추정값(어느 파일은 그중 파일 작업만, 어느 도구는 작업 목록 갱신 같은 기록용 호출 제외) · 기준 ' + sharp + ' · 모델 내부의 확신도 아님',
+    agent: '에이전트', finished: '완료됨',
+    progTip: (name, n, med) => '추정: 같은 종류(' + name + ') 완료 ' + n + '건이 쓴 도구 호출 중앙값 ' + med + '회와 견준 값',
+    progNone: '견줄 완료 기록이 부족해 진행률을 추정하지 않음',
+    progAria: (name, est) => name + ' 진행률' + (est ? ' (추정)' : ''),
+    noDesc: '(설명 없음)',
+    kvCalls: '도구 호출', errParen: (n) => ' (오류 ' + n + ')', kvTok: '토큰', kvElapsed: '걸린 시간', kvLastAction: '마지막 동작',
+    backToMain: '메인으로 복귀', latestReply: '최근 응답',
+    waitingSubs: '하위 에이전트 결과 대기', noToolsAfter: '복귀 후 도구 호출 없음',
+    afterTip: '가장 최근에 끝난 하위 에이전트 이후 메인 세션이 쓴 도구를 종류별로 묶은 것',
+    kvLastActivity: '마지막 활동', kvPrompts: '사용자 요청', nItems: (n) => n + '건',
+    noReply: '(아직 응답 없음)',
+    delegWire: (total, running) => '하위 에이전트에 위임 · ' + total + '개 중 ' + running + '개 실행 중',
+    otherSubs: (n) => '그 밖의 하위 에이전트 ' + n + '개', topTools: '많이 쓴 도구 · 하위 에이전트 포함',
+    logAria: '세션 로그', main: '메인', tool: '도구', consult: '자문',
+    pTip: (file, n, few) => '이 호출까지 최근 ' + (file ? '파일 작업 ' : '도구 호출 ') + n + '건 중 같은 ' + (file ? '파일' : '도구') + '을 고른 비율' + (few ? ' — 표본이 5건 미만이라 판정하지 않음' : ''),
+    noRows: '해당하는 기록이 없습니다.', logTitle: (n) => '세션 로그 · 최근 ' + n + '건',
+    chipAll: '전체', chipMain: '메인만', chipTool: '도구만', chipErr: '오류만',
+    pNote1: 'p = 그 호출까지 최근 도구 호출(최대 20건, 파일 작업은 파일 작업끼리, 기록용 호출 제외) 중 같은 파일 또는 같은 도구를 고른 비율. 표본이 5건 미만이면 판정 대신 n 을 표시하고, 기록용 호출 줄에는 p 를 붙이지 않음. ',
+    pNote2: (sharp) => ' ' + sharp + ' 이상 · ', pNote3: ' 그 미만. 모델 내부의 확신도는 아닙니다.',
+    loadingLegend: '세션을 불러오는 중', roleMain: ' 메인', mixed: '여러 모델', roleSub: (n) => ' 하위 ' + n + '개',
+    lgMain: ' · 메인', lgSub: ' · 하위', lgNoSubs: '하위 에이전트 · 없음', lgTools: (n) => '도구 · ' + n + '회', lgAdv: ' · 조언자', lgAdvCalls: (n) => '조언자 · ' + n + '회',
+    sbSession: '세션 ', sbWaiting: '[대기 중]', sbSubs: '하위 에이전트',
+    reconTip: ' — 기록에 남은 모델로 다시 조립한 표기입니다 (실제로 입력한 명령이 아님)',
+    recon: '# 기록으로 재구성한 표기', callsVal: (n) => n + '회',
+  },
+};
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* 저장이 막힌 브라우저에서는 이번 방문에만 적용 */ } } };
+function pickLang() {
+  const q = new URLSearchParams(location.search).get('lang');
+  if (Object.hasOwn(I18N, q || '')) return q;   // ?lang=constructor 같은 값이 내장 속성에 걸리지 않게
+  const saved = store.get('agent-watchtower-lang');
+  if (Object.hasOwn(I18N, saved || '')) return saved;
+  return /^ko/i.test(navigator.language || '') ? 'ko' : 'en';
+}
+let LANG = pickLang(), T = I18N[LANG];
+let connState = 'connecting';
+// 기록에 없는 문구(서버가 code 로만 알려 주는 것)는 여기서 언어에 맞춰 붙인다
+const evText = (e) => (e.code ? T.ev[e.code] || '' : e.text || '');
+const sigLabel = (g) => T.sig[g.key] || g.label || g.key;
+// 처음 한 번과 언어를 바꿀 때: 그림과 무관하게 고정된 자리의 문구를 채운다
+function applyStatic() {
+  document.documentElement.lang = LANG;
+  document.title = T.title;
+  $('legend').setAttribute('aria-label', T.legendAria);
+  $('langBtn').textContent = T.langBtn; $('langBtn').title = T.langTip; $('langBtn').setAttribute('lang', LANG === 'ko' ? 'en' : 'ko');
+  $('connText').textContent = T.conn[connState];
+  $('listHead').textContent = T.sessionsHead(state.snap ? state.snap.windowHours || 24 : 24);
+  const boot = $('bootMsg'); if (boot) boot.textContent = T.readingLogs;
+}
+function setLang(l) {
+  LANG = l; T = I18N[l]; store.set('agent-watchtower-lang', l);
+  state.listKey = ''; state.detailKey = '';
+  applyStatic(); renderTop(); renderList(); renderDetail();
+}
+
+function renderTop() {
+  const s = state.snap; if (!s) return;
+  $('listHead').textContent = T.sessionsHead(s.windowHours || 24);
+  const working = s.sessions.filter((x) => x.status === 'working').length;
+  const subs = s.sessions.reduce((n, x) => n + x.subagentsRunning, 0);
+  const stat = (label, value) => h('span', {}, label + ' [', h('b', { text: value }), ']');
+  $('topStats').replaceChildren(
+    stat(T.topSessions, s.sessions.length), stat(T.topWorking, working), stat(T.topSubs, subs));
+}
+
+function renderList() {
+  const s = state.snap; if (!s) return;
+  const key = JSON.stringify([LANG, state.selected, state.pinned, s.loading,
+    s.sessions.map((x) => [x.id, x.title, x.project, x.status, fmtAgo(x.lastActivity, s.now), x.toolCalls, x.subagents, x.errors])]);
+  if (key === state.listKey) return;
+  state.listKey = key;
+  const follow = state.pinned ? h('button', { class: 'chip', type: 'button', style: 'margin:0 0 8px 4px',
+    onclick: () => { state.pinned = false; if (state.snap) onSnapshot(state.snap); } }, T.follow) : null;
+  const items = s.sessions.map((x) => h('button', {
+    class: 'sess', type: 'button', 'data-id': x.id, 'aria-current': x.id === state.selected ? 'true' : null,
+    onclick: () => { select(x.id); state.pinned = true; renderList(); loadDetail(); },
+  },
+    h('div', { class: 't' }, h('span', { class: 'dot ' + x.status, title: T.status[x.status] }), h('span', { class: 'name', text: x.title || T.untitled })),
+    h('div', { class: 'm', text: x.project, title: x.project }),
+    h('div', { class: 'm2' },
+      h('span', { text: fmtAgo(x.lastActivity, s.now) }),
+      h('span', { class: 'num', text: T.nTools(fmtNum(x.toolCalls)) }),
+      x.subagents ? h('span', { class: 'num', text: T.nSubs(x.subagents) }) : null,
+      x.errors ? h('span', { class: 'num', style: 'color:var(--err)', text: T.nErrs(x.errors) }) : null)));
+  // 다시 그려도 키보드 포커스가 같은 세션에 남도록
+  const focused = document.activeElement && document.activeElement.closest('#list') ? document.activeElement.dataset.id : null;
+  $('list').replaceChildren(follow || '', ...(items.length ? items : [h('div', { class: 'm', style: 'padding:8px', text: s.loading ? T.reading : T.noSessions(s.windowHours || 24) })]));
+  if (focused) { const el = [...document.querySelectorAll('#list .sess')].find((b) => b.dataset.id === focused); if (el) el.focus({ preventScroll: true }); }
+}
+
+const tile = (k, v, sub, cls) => h('div', { class: 'tile' },
+  h('div', { class: 'k', text: k }), h('div', { class: 'v ' + (cls || ''), text: v }), sub ? h('div', { class: 's', text: sub }) : null);
+const kv = (pairs) => h('dl', { class: 'kv' }, pairs.filter(Boolean).flatMap(([k, v]) => [h('dt', { text: k }), h('dd', { text: v, title: v })]));
+
+function renderDetail() {
+  const d = state.detail, now = state.snap ? state.snap.now : Date.now();
+  if (!d) { state.detailKey = ''; renderStatus(); $('main').replaceChildren(h('div', { class: 'empty', text: state.snap && !state.snap.sessions.length ? T.nothingToShow : T.loadingSession })); return; }
+
+  const running = d.status === 'working' || d.subagentList.some((a) => a.status === 'running');
+  const key = JSON.stringify([LANG, d, state.filter, fmtAgo(d.lastActivity, now), fmtAgo(d.advisor.lastTs, now), !!(d.advisor.lastTs && now - d.advisor.lastTs < 90000), running ? Math.floor(now / 1000) : 0]);
+  if (key === state.detailKey) return;
+  state.detailKey = key;
+
+  const oldLog = document.querySelector('.log');
+  const stick = state.resetScroll || !oldLog || oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight < 40;
+  state.resetScroll = false;
+  const oldTop = oldLog ? oldLog.scrollTop : 0;
+
+  const head = h('div', {},
+    h('div', { class: 'head' },
+      h('h2', { text: d.title || T.untitled }),
+      h('span', { class: 'pill' }, h('span', { class: 'dot ' + d.status }), T.status[d.status]),
+      h('span', { class: 'pill', text: T.lastActivityPill(fmtAgo(d.lastActivity, now)) })),
+    h('div', { class: 'sub-head', text: d.project + (d.gitBranch ? T.branch(d.gitBranch) : '') }));
+
+  const u = d.usage;
+  // 요약 한 줄: 맨 아래 상태줄과 같은 대괄호 표기. 보충 설명은 마우스를 올리면 나옴
+  const st = (label, value, tip, cls) => h('span', { class: 'st ' + (cls || ''), title: tip }, label + ' ', h('b', { text: '[' + value + ']' }));
+  const tiles = h('div', { class: 'statline' },
+    st(T.stReq, fmtNum(d.turns), T.stReqTip + (d.firstTs ? T.started(fmtTime(d.firstTs)) : '')),
+    st(T.stTools, fmtNum(d.toolCallsAll ?? d.toolCalls), T.stToolsTip(fmtNum(d.toolCalls))),
+    st(T.stErr, fmtNum(d.errors), T.stErrTip, d.errors ? 'err' : ''),
+    st(T.stCtx, fmtNum(d.context), T.stCtxTip + (d.compactions ? T.compactions(d.compactions) : '')),
+    st(T.stOut, fmtNum(u.output), T.stOutTip(fmtNum(u.input + u.cacheCreate), fmtNum(u.cacheRead))),
+    d.cost != null ? st(T.stCost, '$' + d.cost.toFixed(2), T.stCostTip) : null);
+
+  // ── 흐름도: 조언자(왼쪽) ··▶ 메인 세션 → 도구 → 하위 에이전트로 위임 → 메인으로 복귀 ──
+  const adv = d.advisor;
+  const working = d.status === 'working';
+  const subsRunning = d.subagentsRunning > 0;
+  // 세로 연결선. on 이면 선을 따라 점이 흘러내림
+  const wire = (label, on) => h('div', { class: 'wire' + (on ? ' on' : '') }, label ? h('span', { text: label }) : null);
+
+  const advising = adv.lastTs && now - adv.lastTs < 90000;   // 최근 1분 30초 안에 자문
+  const why = adv.why || {};
+  const WHY = T.why;
+  const advUsed = !!(adv.model || adv.calls);   // 자문 기록이 전혀 없으면 패널을 그리지 않는다
+  // 세 시점 표시줄. 가장 최근 자문의 시점은 ◆ 로 강조하고, 방금 자문했으면 점선 위로 점이 흐른다
+  const marker = (key) => {
+    const cur = adv.lastWhy === key;
+    return h('div', { class: 'mk' + (cur ? ' cur' : '') + (cur && advising ? ' on' : '') },
+      h('span', { class: 'g', text: cur ? '◆' : '◇' }), h('span', { text: WHY[key] }), h('span', { class: 'n', text: T.nTimes(why[key] || 0) }));
+  };
+  const lastTwo = (adv.times || []).slice(-2).reverse();
+  const advisorBox = h('div', { class: 'box adv fc-adv' },
+    h('div', { class: 'adv-title', text: adv.model ? prettyModel(adv.model) : T.advisor }),
+    h('div', { class: 'adv-sub', text: T.advisor + ' · ' + (advising ? T.advRecent : T.advStandby) }),
+    marker('plan'),
+    h('div', { class: 'spine' },
+      h('div', { class: 'dimtxt', text: T.advRecentHead }),
+      lastTwo.length
+        ? lastTwo.map((t) => h('div', { class: 'adv-line', text: '» ' + fmtTime(t.ts) + ' · ' + (WHY[t.why] || '') }))
+        : h('div', { class: 'adv-line none', text: T.advNoneYet }),
+      h('div', { class: 'gap' }),
+      kv([[T.advCount, String(adv.calls)], [T.advToRead, fmtNum(d.context)]]),
+      h('div', { class: 'dimtxt small', text: T.advCtxNote })),
+    marker('error'),
+    h('div', { class: 'spine' },
+      h('div', { class: 'dimtxt', text: T.advOver(d.turns) }),
+      h('div', { class: 'dimtxt', text: T.advN(adv.calls) }),
+      h('div', { class: 'gap' }),
+      h('div', { class: 'dimtxt', text: T.advLast }),
+      h('div', { class: 'dimtxt', text: adv.lastTs ? fmtAgo(adv.lastTs, now) : T.none })),
+    marker('done'),
+    h('div', { class: 'note', text: T.advNote }));
+
+  // 메인 세션 상자: 모델 · 메인 세션 / 지금 주로 하는 일 / 추론 강도 막대 / --model 표기, 그 아래 세부
+  //  '주로 하는 일'은 메인 세션의 최근 도구 호출 20건을 종류별로 묶어 많은 순서로 둘을 고른 것
+  const kindOf = (t) => /^(Edit|Write|NotebookEdit)$/.test(t) ? 'edit' : t === 'Bash' ? 'bash'
+    : /^(Read|Grep|Glob)$/.test(t) ? 'read' : /^(Agent|Task)$/.test(t) ? 'delegate' : /^Web/.test(t) ? 'web'
+    : /browser|chrome|playwright/i.test(t) ? 'browser' : /update_plan|wrap_up|TodoWrite|ToolSearch/.test(t) ? null : 'other';
+  const kinds = new Map();
+  const mainRecent = d.recentMain ? d.recentMain.map((x) => ({ tool: x.name, ts: x.ts, actor: 'main', kind: 'tool' }))
+    : d.events.filter((e) => e.actor === 'main' && e.kind === 'tool').slice(-20);   // 서버가 옛 판이면 로그에서 추림
+  for (const e of mainRecent) {
+    const k = kindOf(e.tool || ''); if (k) kinds.set(k, (kinds.get(k) || 0) + 1);
+  }
+  const doing = [...kinds].sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => T.kinds[x[0]]).join(' + ') || T.noToolUse;
+  const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+  const level = LEVELS.indexOf(d.effort) + 1;   // 0 이면 기록 없음
+  const modelName = prettyModel(d.model);
+  const mainBox = h('div', { class: 'box main mb' },
+    h('div', { class: 'mb-title', text: (modelName ? modelName[0].toUpperCase() + modelName.slice(1) : T.unknownModel) + ' · ' + T.mainSession }),
+    h('div', { class: 'mb-doing', text: doing, title: T.doingTip }),
+    h('div', { class: 'mb-effort' }, T.effort,
+      h('span', { class: 'ebars', role: 'img', 'aria-label': level ? T.effortAria(level) : T.notRecorded },
+        LEVELS.map((_, i) => h('i', { class: i < level ? 'f' : '' }))),
+      h('b', { text: d.effort || '—' })),
+    h('div', { class: 'mb-flag', text: '--model ' + shortModel(d.model) }),
+    h('div', { class: 'mb-more' },
+      kv([[T.kvStatus, T.status[d.status]], [T.kvTokens, fmtNum(d.tokens) + T.tokensNote]]),
+      d.pending.length && working
+        ? h('div', { class: 'pending' }, h('div', { text: T.pendingTools }),
+            d.pending.map((p) => h('div', { text: '· ' + p.name + (p.summary ? ' — ' + p.summary : '') })))
+        : null));
+
+  // 판단 층 상자: 첫 줄에 제목과 도구 호출 수, 막대 세 줄, 맨 아래 판정 풀이 한 줄
+  const sigs = d.signals || [];   // 서버가 옛 버전이면 없음
+  const SHARP = 0.7;              // 이 값 이상이면 '또렷', 아니면 '갈림'
+  // 바닥줄 풀이('한 방향' / '여러 갈래')는 방향을 나타내는 두 지표로만 판단한다. 오류 비율은 방향이 아니므로 제외
+  const dirSigs = sigs.filter((g) => g.key !== 'ok' && typeof g.value === 'number');
+  const anySplit = dirSigs.some((g) => g.value < SHARP);
+  const anySharp = dirSigs.some((g) => g.value >= SHARP);
+  const toolsBox = h('div', { class: 'tools-wrap' },
+    h('div', { class: 'box tools' },
+      h('div', { class: 'jl-head' },
+        h('span', { class: 'jl-title', text: T.jlTitle }),
+        h('span', { class: 'jl-count', title: T.jlCountTip }, T.jlCount, h('b', { text: (Number(d.toolCalls) || 0).toLocaleString('en-US') }))),
+      sigs.length ? [
+        sigs.map((g) => {
+          const has = typeof g.value === 'number';
+          const cls = !has ? 'na' : g.value >= SHARP ? 'sharp' : 'split';
+          const word = !has ? T.few : g.value >= SHARP ? T.sharp : T.split;
+          // 가장 많이 고른 대상(파일·도구 이름)은 마우스를 올리면 나옴
+          const label = sigLabel(g);
+          const tip = T.sigTip(label, g, has);
+          return h('div', { class: 'sig ' + cls, title: tip },
+            h('span', { class: 'lbl', text: label }),
+            h('span', { class: 'meter', role: 'img', 'aria-label': label + ' ' + (has ? g.value.toFixed(2) + ' ' + word : word) },
+              h('i', { style: 'width:' + (has ? Math.round(g.value * 100) : 0) + '%' })),
+            h('span', { class: 'val', text: has ? g.value.toFixed(2) + ' ' + word : '— ' + word }));
+        }),
+        // 해당하는 판정에 색을 넣는다 (지표마다 다르면 둘 다, 표본이 부족하면 둘 다 흐리게)
+        h('div', { class: 'jl-foot' },
+          h('span', { class: 'k-sharp' + (anySharp ? ' cur' : ''), text: T.footSharp }),
+          h('span', { class: 'k-split' + (anySplit ? ' cur' : ''), text: T.footSplit })),
+      ] : h('div', { class: 'note', style: 'margin:0', text: T.noToolsYet })),
+    sigs.length ? h('div', { class: 'note jl-note', text: T.jlNote(d.signalWindow || 0, SHARP) }) : null);
+
+  // 하위 에이전트 카드: 이름 · 모델 · 진행률 막대 · 맡은 일 · 상태, 그 아래 세부 수치
+  const GLYPH = { running: '◐', done: '✓', stalled: '!' };
+  const subCard = (a) => {
+    const name = a.type || T.agent;
+    const prog = a.status === 'done' ? 100 : a.progress;
+    const has = typeof prog === 'number';
+    const tip = a.status === 'done' ? T.finished
+      : has ? T.progTip(name, a.basisN, a.basisMedian)
+      : T.progNone;
+    return h('div', { class: 'box sub ' + a.status },
+      h('div', { class: 'sc-name', text: name }),
+      h('div', { class: 'sc-model', text: prettyModel(a.model) || T.unknownModel }),
+      h('div', { class: 'prog' + (has ? '' : ' unknown'), title: tip },
+        h('span', { class: 'ptrack', role: 'progressbar', 'aria-label': T.progAria(name, a.est),
+            'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': has ? String(prog) : null },
+          h('i', { style: 'width:' + (has ? prog : a.status === 'running' ? 30 : 0) + '%' })),
+        h('span', { class: 'pct', text: has ? (a.est ? '≈' : '') + prog + '%' : '—' })),
+      h('div', { class: 'desc', text: a.description || T.noDesc, title: a.description || '' }),
+      h('div', { class: 'sc-status' }, h('span', { text: (GLYPH[a.status] || '·') + ' ' + T.status[a.status] })),
+      kv([[T.kvCalls, a.toolCalls + (a.errors ? T.errParen(a.errors) : '')],
+          [T.kvTok, fmtNum(a.tokens)], [T.kvElapsed, a.firstTs ? fmtDur((a.status === 'running' ? now : a.lastTs) - a.firstTs) : '—'],
+          a.lastAction ? [T.kvLastAction, a.lastAction] : null]));
+  };
+
+  // 흐름도에는 실행 중인 것 → 최근 것 순으로 최대 3개, 나머지는 아래 목록으로
+  const rank = { running: 0, stalled: 1, done: 2 };
+  const ranked = [...d.subagentList].sort((a, b) => rank[a.status] - rank[b.status] || (b.firstTs || 0) - (a.firstTs || 0));
+  const shown = ranked.slice(0, 3), rest = ranked.slice(3);
+
+  const lastText = d.lastMainText ? { text: d.lastMainText }
+    : [...d.events].reverse().find((e) => e.actor === 'main' && e.kind === 'text');
+  // 복귀 상자: '<모델> 메인으로 복귀' / 복귀한 뒤 한 일, 그 아래 세부
+  //  '복귀한 뒤 한 일'은 가장 최근에 끝난 하위 에이전트 이후 메인 세션이 쓴 도구를 종류별로 묶은 것 (메인의 최근 도구 호출 20건 범위)
+  const doneTs = Math.max(0, ...d.subagentList.filter((a) => a.status === 'done').map((a) => a.lastTs || 0));
+  const after = new Map();
+  if (doneTs) for (const e of mainRecent) {
+    if (e.actor !== 'main' || e.kind !== 'tool' || !(e.ts > doneTs)) continue;
+    const k = kindOf(e.tool || ''); if (k) after.set(k, (after.get(k) || 0) + 1);
+  }
+  const afterText = [...after].sort((a, b) => b[1] - a[1]).slice(0, 2).map((x) => T.kinds[x[0]]).join(' + ');
+  const Model = modelName ? modelName[0].toUpperCase() + modelName.slice(1) : T.mainSessionCap;
+  const returnBox = h('div', { class: 'box main mb fc-return' },
+    h('div', { class: 'mb-title', text: Model + ' · ' + (shown.length ? T.backToMain : T.latestReply) }),
+    shown.length
+      ? h('div', { class: 'mb-doing', text: afterText || (subsRunning ? T.waitingSubs : T.noToolsAfter),
+          title: T.afterTip })
+      : null,
+    h('div', { class: 'mb-more' },
+      kv([[T.kvLastActivity, fmtAgo(d.lastActivity, now)], [T.kvPrompts, T.nItems(d.turns)]]),
+      h('div', { class: 'last', text: lastText ? lastText.text : T.noReply, title: lastText ? lastText.text : '' })));
+
+  const center = [mainBox, wire(null, working), toolsBox];
+  if (shown.length) center.push(
+    wire(T.delegWire(d.subagents, d.subagentsRunning), subsRunning),
+    h('div', { class: 'branch' + (subsRunning ? ' on' : '') + (shown.length === 1 ? ' single' : ''), style: '--n:' + shown.length }, shown.map(subCard)),
+    wire(null, subsRunning));
+  else center.push(wire(null, working));
+  center.push(returnBox);
+
+  // 화면을 다시 그릴 때마다 요소가 새로 만들어지므로, 움직임이 처음부터 다시 시작하지 않게 벽시계 기준으로 시작 위치를 맞춘다
+  //  (모든 움직임의 주기가 1초 또는 2초라 2초 단위로 맞추면 끊기지 않고 이어짐)
+  const flow = h('div', { class: 'flowchart' + (advUsed ? '' : ' no-adv'), style: '--t:-' + (Date.now() % 2000) + 'ms' }, advUsed ? advisorBox : null, h('div', { class: 'fc-center' }, center));
+  const subs = rest.length ? [
+    h('h2', { text: T.otherSubs(rest.length) }),
+    h('div', { class: 'subs' }, rest.map(subCard))] : [];
+  const maxTool = d.tools.length ? d.tools[0][1] : 1;
+  const bars = d.tools.length ? [
+    h('h2', { text: T.topTools }),
+    h('div', { class: 'bars' }, d.tools.map(([name, c]) => h('div', { class: 'bar' },
+      h('span', { class: 'n', text: name, title: name }),
+      h('span', { class: 'track' }, h('span', { class: 'fill', style: 'display:block;width:' + Math.max(2, Math.round(c / maxTool * 100)) + '%' })),
+      h('span', { class: 'c', text: String(c) }))))] : [];
+
+  const chip = (key, label) => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === key),
+    onclick: () => { state.filter = key; renderDetail(); } }, label);
+  const rows = d.events.filter((e) => state.filter === 'all' || (state.filter === 'error' && e.kind === 'error')
+    || (state.filter === 'main' && e.actor === 'main') || (state.filter === 'tool' && e.kind === 'tool'));
+  const log = h('div', { class: 'log', tabindex: '0', 'aria-label': T.logAria },
+    rows.length ? rows.map((e) => {
+      const who = e.kind === 'advisor' ? 'adv' : e.actor === 'main' ? 'main' : 'sub';
+      // 주체: 메인은 모델 이름, 하위는 에이전트 종류, 자문은 조언자 모델
+      const actor = e.kind === 'advisor' ? (prettyModel(adv.model) || T.advisor) : e.actor === 'main' ? (modelName || T.main) : (e.actor || T.agent);
+      const isTool = e.kind === 'tool' || e.kind === 'error';
+      const toolShort = String(e.tool || '').replace(/^mcp__.*__/, '');   // 'mcp__서버__도구' → '도구'
+      const what = isTool ? (toolShort || T.tool) : e.kind === 'advisor' ? T.consult : T.kind[e.kind] || e.kind;
+      const sharp = typeof e.p === 'number' && e.p >= SHARP;
+      const few = typeof e.pn === 'number' && e.pn < 5;
+      return h('div', { class: 'row ' + e.kind },
+        h('span', { class: 'ts', text: fmtTime(e.ts) }),
+        h('span', { class: 'who ' + who, text: actor, title: actor }),
+        h('span', { class: 'what', text: what, title: isTool ? e.tool || '' : '' }),
+        h('span', { class: 'txt', text: evText(e), title: evText(e) }),
+        typeof e.p === 'number'
+          ? h('span', { class: 'p ' + (few ? 'few' : sharp ? 'sharp' : 'split'),
+              title: T.pTip(e.pk === 'file', e.pn || '?', few) },
+              'p=' + e.p.toFixed(2) + ' ', h('b', { text: few ? 'n=' + e.pn : sharp ? T.sharp : T.split }))
+          : h('span', { class: 'p' }));
+    }) : h('div', { class: 'none', text: T.noRows }));
+  // 로그 상자: 제목과 거르기 단추가 위쪽 테두리에 얹힘
+  const logSec = [
+    h('div', { class: 'logbox' },
+      h('div', { class: 'logbox-title', text: T.logTitle(rows.length) }),
+      h('div', { class: 'logbox-chips' }, chip('all', T.chipAll), chip('main', T.chipMain), chip('tool', T.chipTool), chip('error', T.chipErr)),
+      log),
+    h('div', { class: 'note' }, T.pNote1,
+      h('span', { class: 'k-sharp', text: T.sharp }), T.pNote2(SHARP), h('span', { class: 'k-split', text: T.split }), T.pNote3)];
+
+  $('main').replaceChildren(head, tiles, flow, ...bars, ...subs, ...logSec);
+  $('main').style.setProperty('--t', '-' + (Date.now() % 2000) + 'ms');
+  renderStatus();
+  log.scrollTop = stick ? log.scrollHeight : oldTop;
+}
+
+// 긴 경로는 앞을 줄이고 끝(실제 폴더 이름)을 남긴다
+const shortPath = (p, n) => { p = String(p || '~'); return p.length > n ? '…' + p.slice(-(n - 1)) : p; };
+
+// 'claude-fable-5-2' → 'fable 5.2' (머리글·범례 표기용)
+const prettyModel = (m) => m ? String(m).replace(/^claude-/, '').replace(/-(\d+)-(\d+).*$/, ' $1.$2').replace(/-(\d+)$/, ' $1') : '';
+
+// 이 화면이 글자 몇 칸 × 몇 줄인지 (창 제목줄의 '168x52' 표기용)
+function termSize() {
+  const probe = h('span', { style: 'position:absolute;visibility:hidden;white-space:pre', text: 'M'.repeat(40) });
+  document.body.append(probe);
+  const cw = probe.offsetWidth / 40 || 8, lh = parseFloat(getComputedStyle(document.body).lineHeight) || 20;
+  probe.remove();
+  const term = document.querySelector('.term');
+  return Math.floor(term.clientWidth / cw) + 'x' + Math.floor(innerHeight / lh);
+}
+
+// 맨 위: 창 제목(폴더 — claude — 칸x줄), 머리글(제목 · 메인 모델 · 하위 모델), 범례
+function renderHeader() {
+  const d = state.detail;
+  $('wtitle').textContent = shortPath(d ? d.project : '~', 56) + ' — claude — ' + termSize();
+  $('wtitle').title = d ? d.project : '';
+  const sep = () => h('span', { class: 'sep', text: '·' });
+  if (!d) { $('headRoles').replaceChildren(); $('legend').replaceChildren(h('span', { class: 'l-main', text: T.loadingLegend })); return; }
+  const adv = d.advisor;
+  const running = d.subagentList.filter((a) => a.status === 'running');
+  const subModel = (running[0] || d.subagentList[0] || {}).model;
+  const mixed = new Set(d.subagentList.map((a) => a.model).filter(Boolean)).size > 1;
+  // replaceChildren 은 배열·null 을 풀어 주지 않으므로 직접 펼쳐서 넘긴다
+  $('headRoles').replaceChildren(...[
+    sep(), h('span', { class: 'r-main', text: prettyModel(d.model) || T.unknownModel }), T.roleMain,
+    d.subagents ? [sep(), h('span', { class: 'r-sub', text: mixed ? T.mixed : prettyModel(subModel) || T.unknownModel }), T.roleSub(d.subagents)] : [],
+  ].flat());
+  $('legend').replaceChildren(
+    h('span', { class: 'l-main', text: (prettyModel(d.model) || T.unknownModel) + T.lgMain }),
+    h('span', { class: 'l-sub', text: d.subagents ? (mixed ? T.mixed : prettyModel(subModel) || T.unknownModel) + T.lgSub : T.lgNoSubs }),
+    h('span', { class: 'l-ok', text: T.lgTools((Number(d.toolCallsAll ?? d.toolCalls) || 0).toLocaleString('en-US')) }),
+    h('span', { class: 'l-adv', text: adv.model ? prettyModel(adv.model) + T.lgAdv : adv.calls ? T.lgAdvCalls(adv.calls) : T.advNoneLegend }));
+}
+window.addEventListener('resize', () => { $('wtitle').textContent = shortPath(state.detail ? state.detail.project : '~', 56) + ' — claude — ' + termSize(); });
+
+// 맨 아래 두 줄 상태 표시.
+//  1줄: 폴더 $ claude --model <메인 모델> [--advisor <조언자 모델>]  ← 기록된 모델로 다시 조립한 표기(실제 입력한 명령이 아님)
+//  2줄: <하위 모델> [상태]   subagents [실행 중/전체]   <조언자 모델> [상태]   tools [호출 수]
+function renderStatus() {
+  renderHeader();
+  const d = state.detail, now = state.snap ? state.snap.now : Date.now();
+  const cursor = () => h('span', { class: 'cursor' });
+  if (!d) {
+    $('statusbar').replaceChildren(
+      h('div', { class: 'line1' }, h('span', { class: 'path', text: '~ $' }), ' ', cursor()),
+      h('div', { class: 'line2' }, h('span', { class: 'seg' }, T.sbSession, h('b', { text: T.sbWaiting }))));
+    return;
+  }
+  const adv = d.advisor;
+  const seg = (cls, label, value) => h('span', { class: 'seg ' + cls }, label + ' ', h('b', { text: '[' + value + ']' }));
+  const running = d.subagentList.filter((a) => a.status === 'running');
+  const subModel = (running[0] || d.subagentList[0] || {}).model;   // 실행 중인 것 우선, 없으면 가장 최근 것
+  const mixed = new Set(d.subagentList.map((a) => a.model).filter(Boolean)).size > 1;
+  const advising = adv.lastTs && now - adv.lastTs < 90000;         // 최근 1분 30초 안에 자문했으면 '최근 자문'
+  const flag = (name, value) => [' ', h('span', { class: 'flag', text: name }), ' ' + value];
+
+  $('statusbar').replaceChildren(
+    h('div', { class: 'line1', title: d.project + ' $ claude --model ' + shortModel(d.model) + (adv.model ? ' --advisor ' + shortModel(adv.model) : '')
+        + T.reconTip },
+      h('span', { class: 'cmd' }, h('span', { class: 'path', text: shortPath(d.project, 34) + ' $' }), ' claude',
+      flag('--model', shortModel(d.model)),
+      adv.model ? flag('--advisor', shortModel(adv.model)) : null,
+      ' ', cursor()), h('span', { class: 'recon', text: T.recon })),
+    h('div', { class: 'line2' },
+      d.subagents ? seg('s-sub', mixed ? T.mixed : shortModel(subModel), running.length ? T.status.running : d.subagentList.some((a) => a.status === 'stalled') ? T.status.stalled : T.status.done) : seg('s-sub', T.sbSubs, T.none),
+      seg('s-count', 'subagents', d.subagentsRunning + '/' + d.subagents),
+      adv.model || adv.calls ? seg('s-adv', adv.model ? shortModel(adv.model) : T.advisor, advising ? T.advRecent : T.advStandby)
+        : seg('s-adv', T.advisor, T.none),
+      seg('s-tools', 'tools', T.callsVal((Number(d.toolCallsAll ?? d.toolCalls) || 0).toLocaleString('en-US'))),
+      d.errors ? seg('s-err', 'errors', String(d.errors)) : null));
+}
+
+function select(id) {
+  if (id === state.selected) return;
+  state.selected = id; state.detail = null; state.resetScroll = true; // 다른 세션의 스크롤 위치를 물려받지 않게
+}
+
+async function loadDetail() {
+  if (!state.selected) return;
+  const id = state.selected, my = ++state.req;
+  try {
+    const r = await fetch('/api/session?id=' + encodeURIComponent(id));
+    const data = r.ok ? await r.json() : null;
+    if (my !== state.req || id !== state.selected) return; // 더 새 요청이 있거나 다른 세션을 골랐으면 버림
+    state.detail = data;
+    renderDetail();
+  } catch { /* 서버가 잠깐 끊긴 경우: 다음 갱신 때 다시 시도 */ }
+}
+
+function onSnapshot(snap) {
+  state.snap = snap;
+  const ids = new Set(snap.sessions.map((x) => x.id));
+  if (!ids.has(state.selected)) state.pinned = false; // 고른 세션이 목록에서 사라지면 고정 해제
+  if (!state.pinned) {
+    // 따라가기: 보고 있는 세션이 작업 중이면 그대로 두고(이리저리 튀지 않게), 아니면 작업 중인 세션으로 옮긴다
+    const cur = snap.sessions.find((x) => x.id === state.selected);
+    if (!cur || cur.status !== 'working') {
+      const next = snap.sessions.find((x) => x.status === 'working') || cur || snap.sessions[0];
+      select(next ? next.id : null);
+    }
+  }
+  renderTop(); renderList();
+  if (state.selected) { if (!document.hidden) loadDetail(); } else renderDetail();
+}
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { connState = 'live'; $('connDot').className = 'dot working'; $('connText').textContent = T.conn.live; };
+  es.onmessage = (ev) => { try { onSnapshot(JSON.parse(ev.data)); } catch (e) { console.error(e); } };
+  es.onerror = () => { connState = 'lost'; $('connDot').className = 'dot off'; $('connText').textContent = T.conn.lost; };
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDetail(); });
+$('langBtn').addEventListener('click', () => setLang(LANG === 'ko' ? 'en' : 'ko'));
+applyStatic();
+connect();
+</script>
+</body>
+</html>
