@@ -14,7 +14,7 @@
     "index.html",
     "README.md",
     "README.ko.md",
-    "docs",
+    "docs/*.md",
     "LICENSE"
   ],
   "scripts": {

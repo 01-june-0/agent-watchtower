@@ -4,6 +4,10 @@ A local, read-only dashboard that shows what the Claude Code sessions on your ma
 
 [한국어 README](README.ko.md)
 
+![Agent Watchtower: a working session with its advisor panel, decision layer and three subagents](https://raw.githubusercontent.com/01-june-0/agent-watchtower/main/docs/images/screenshot-en.png)
+
+<sub>Screenshot made from demo transcripts (`scripts/demo-data.mjs`), not real sessions.</sub>
+
 - **Read-only.** The dashboard only reads the session transcripts Claude Code already writes. It never changes them or your Claude Code settings. (The separate, opt-in `setup --yes` command is the only thing that writes to your config.)
 - **Local only.** The server binds to `127.0.0.1` and sends nothing off your machine. No account, no telemetry, no external requests.
 - **No dependencies.** Plain Node.js, no packages to install.

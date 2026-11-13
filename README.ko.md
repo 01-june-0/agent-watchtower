@@ -4,6 +4,10 @@
 
 [English README](README.md)
 
+![에이전트 워치타워: 조언자 패널, 판단 층, 하위 에이전트 3개가 보이는 작업 중인 세션](https://raw.githubusercontent.com/01-june-0/agent-watchtower/main/docs/images/screenshot-ko.png)
+
+<sub>실제 세션이 아니라 데모용 가짜 기록(`scripts/demo-data.mjs`)으로 찍은 화면입니다.</sub>
+
 - **읽기 전용.** 대시보드는 Claude Code가 이미 남기는 세션 기록 파일을 읽기만 합니다. 기록이나 Claude Code 설정을 고치지 않습니다. (설정에 쓰는 것은 따로 실행하는 `setup --yes` 명령뿐입니다.)
 - **로컬 전용.** 서버는 `127.0.0.1`에서만 열리고 이 컴퓨터 밖으로 아무것도 보내지 않습니다. 계정, 사용 통계 수집, 외부 요청이 없습니다.
 - **의존성 없음.** 설치할 패키지 없이 Node.js만 있으면 됩니다.

@@ -32,6 +32,7 @@ npm test                        # 계산 규칙 자동 테스트 (node --test, t
 | `bin/agent-watchtower.mjs` | 설치형 명령 진입점. `main(argv, { openDefault: true })` |
 | `setup.mjs`, `setup/{en,ko}/` | `agent-watchtower setup [--yes]`: 조언자(`advisorModel`)·critic/scout 서브에이전트·critic 규칙을 사용자 설정에 추가. `--yes` 없으면 보여 주기만 함. 덮어쓰지 않고 settings.json 은 백업. `setup/ko/` 는 개발자 실제 설정과 글자 단위로 같다 |
 | `docs/SETUP.md`, `docs/SETUP.ko.md` | 같은 화면을 보기 위한 설정 따라 하기 안내서 |
+| `scripts/demo-data.mjs`, `docs/images/` | README 스크린샷용 가짜 세션 기록 생성기와 찍은 이미지. 실제 기록은 프롬프트·경로가 들어 있어 스크린샷에 쓰지 않는다. 다시 찍기: 생성 → `node server.mjs --dir <폴더> --port 4490 --no-open` → 곧바로 크롬 `--headless=new --window-size=1440,1080 --force-device-scale-factor=2 --timeout=3500 --screenshot=...` 로 `?lang=en`·`?lang=ko`. 시각이 생성 순간 기준이라 몇 분 지나면 '멈춘 듯'으로 바뀐다. npm 패키지에는 이미지를 넣지 않는다(`files` 의 `docs/*.md`) |
 | `test/rules.test.mjs`, `test/setup.test.mjs` | 계산 규칙·기록 읽기·옵션·포트 자동 선택 / setup 명령 테스트 |
 | `package.json`, `LICENSE`(MIT), `README.md`, `README.ko.md` | npm 배포용 |
 | `.claude-plugin/`, `commands/start.md` | Claude Code 플러그인(`/agent-watchtower:start`)과 마켓플레이스 정의 |
