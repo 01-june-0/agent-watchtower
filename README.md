@@ -8,6 +8,21 @@ A local, read-only dashboard that shows what the Claude Code sessions on your ma
 - **Local only.** The server binds to `127.0.0.1` and sends nothing off your machine. No account, no telemetry, no external requests.
 - **No dependencies.** Plain Node.js, no packages to install.
 
+## What each command does
+
+| Command | What it does |
+|---|---|
+| `npx agent-watchtower` | Starts the dashboard only. It reads transcripts and never touches your settings. |
+| `npx agent-watchtower setup` | Shows what it would add to your Claude Code config. Changes nothing. |
+| `npx agent-watchtower setup --yes` | Adds it: `advisorModel`, the `critic` and `scout` subagents, and a "review with critic before reporting done" rule. |
+| Plugin command `/agent-watchtower:start` | Starts the dashboard only. It does not run setup. |
+
+**Nothing is configured automatically.** Installing or running the dashboard never changes your Claude Code setup; only `setup --yes`, which you run yourself, does. That is deliberate:
+
+- The advisor calls a stronger model on top of your main one, so it adds usage. The critic rule changes how every Claude Code session works. Both should be your choice.
+- Even with `--yes`, existing files and values are kept (a different `critic.md`, an `advisorModel` you already set), and `settings.json` is backed up before it is changed.
+- The advisor may not be available on every account or plan. Without it, setup still adds the subagents and the rule, and the advisor panel simply stays hidden.
+
 ## Run
 
 Requires Node.js 22 or newer.
